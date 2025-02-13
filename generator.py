@@ -27,11 +27,10 @@ class Generator(nn.Module):
         self.noise_dim = noise_dim
         self.image_dim = image_dim
 
-        self.hidden_dim = 512
+        self.hidden_dim = 1024
         self.leaky_relu_slope = 0.2
 
-        # For three upsampling layers, the initial spatial size is target_dim / 2^3.
-        # For instance, for image_dim=32, init_size will be 4.
+        # Since we have 3 layers, we divide by 8 as we will double the dim 3 times (2**3 = 8)
         self.init_size = image_dim // 8
 
         # Linear layer to project the noise vector into an initial feature map.
