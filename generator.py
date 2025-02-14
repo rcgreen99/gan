@@ -12,16 +12,6 @@ class Generator(nn.Module):
     def __init__(
         self, num_channels: int, noise_dim: int, image_dim: int, dropout: float = 0.25
     ) -> None:
-        """
-        Initializes the Generator.
-
-        Args:
-            num_channels (int): Number of channels in the output image.
-            noise_dim (int): The dimension of the noise vector.
-            image_dim (int): The height/width of the output image (e.g., 32 for a 32x32 image).
-                             Must be divisible by 8.
-            dropout (float): Dropout rate used between upsampling layers.
-        """
         super().__init__()
         self.num_channels = num_channels
         self.noise_dim = noise_dim
@@ -90,31 +80,13 @@ class Generator(nn.Module):
             torch.Tensor: Generated image tensor of shape (batch_size, num_channels, image_dim, image_dim).
         """
         batch_size = x.size(0)
+
         x = self.linear1(x)
         x = x.view(batch_size, self.hidden_dim, self.init_size, self.init_size)
 
-        # Apply each learned upsampling block sequentially.
         x = self.conv1(x)
-        # assert x.shape == (
-        #     batch_size,
-        #     self.hidden_dim // 2,
-        #     self.init_size * 2,
-        #     self.init_size * 2,
-        # )
         x = self.conv2(x)
-        # assert x.shape == (
-        #     batch_size,
-        #     self.hidden_dim // 4,
-        #     self.init_size * 4,
-        #     self.init_size * 4,
-        # )
         x = self.conv3(x)
-        # assert x.shape == (
-        #     batch_size,
-        #     self.num_channels,
-        #     self.image_dim,
-        #     self.image_dim,
-        # )
 
         # If the output shape is not the same, interpolate the output to the target shape.
         if x.shape != (batch_size, self.num_channels, self.image_dim, self.image_dim):
@@ -126,19 +98,8 @@ class Generator(nn.Module):
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    generator = Generator(num_channels=3, noise_dim=100, image_dim=28).to(device)
+    image_dim = 36
+    generator = Generator(num_channels=3, noise_dim=100, image_dim=image_dim).to(device)
     noise = torch.randn(4, 100).to(device)
     generated_image = generator(noise)
-    print(generated_image.shape)  # Expected output: (4, 3, 32, 32)
-
-    # Reverse the normalization form [-1, 1] to [0, 1]
-    image_tensor = generated_image[0]
-    image_tensor = (image_tensor + 1) / 2
-
-    # Convert the tensor to a numpy array in the range with shape (3, 32, 32)
-    image_numpy = image_tensor.cpu().detach().numpy().transpose(1, 2, 0)
-
-    # Plot the image
-    plt.imshow(image_numpy)
-    # plt.show()
-    # plt.savefig("generated_image.png")
+    print(generated_image.shape)

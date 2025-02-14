@@ -1,3 +1,5 @@
+# GAN
+
 A simple implementation of a Generative Adversarial Network (GAN) using PyTorch.
 
 
