@@ -1,16 +1,13 @@
 import argparse
-import os
 import time
 
 from alive_progress import alive_bar, config_handler
 import torch
 import torch.nn as nn
-from matplotlib import pyplot as plt
 from torchvision import datasets, transforms
-from PIL import Image
 
-from generator import Generator
-from discriminator import Discriminator
+from src.models.generator import Generator
+from src.models.discriminator import Discriminator
 from src.hugging_face_dataset import HuggingFaceDataset
 from src.util import alpha_to_white, save_generated_images
 
