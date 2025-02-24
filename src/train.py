@@ -8,8 +8,7 @@ from torchvision import datasets, transforms
 
 from src.models.generator import Generator
 from src.models.discriminator import Discriminator
-from src.hugging_face_dataset import HuggingFaceDataset
-from src.util import alpha_to_white, save_generated_images
+from src.util import save_generated_images
 
 # Progress bar
 config_handler.set_global(spinner="dots_waves", bar="classic", length=40)
@@ -51,7 +50,6 @@ def train(
     criterion = nn.BCELoss().to(device)
 
     # Training loop
-    # get current time
     start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
     with alive_bar(num_epochs, title="Training Progress", length=50) as bar:
         for epoch in range(num_epochs):
@@ -146,23 +144,6 @@ def get_dataset(dataset_name: str):
                 ]
             ),
         )
-    elif "osrs" in dataset_name:
-        # Load the OSRS dataset
-        # Transforms turns png with transparent background into a 3 channel image with values 0-255
-        transform_pipeline = transforms.Compose(
-            [
-                alpha_to_white,  # Convert image transparency to white background
-                transforms.Resize((32, 32)),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]
-        )
-        # Load the OSRS dataset
-        dataset = HuggingFaceDataset(
-            "reese-green/osrs-items-minimal-unnoted",
-            split="train",
-            transform=transform_pipeline,
-        )
     else:
         raise ValueError(f"Dataset {dataset_name} not found")
 
@@ -170,9 +151,8 @@ def get_dataset(dataset_name: str):
 
 
 if __name__ == "__main__":
-    # Take dataset as an argument
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, choices=["mnist", "cifar10", "osrs"])
+    parser.add_argument("--dataset", type=str, choices=["mnist", "cifar10"])
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--learning_rate", type=float, default=0.0002)

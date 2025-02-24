@@ -27,20 +27,3 @@ def save_generated_images(generator, num_images, device, output_path: str):
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         plt.savefig(output_path)
-
-
-def alpha_to_white(img):
-    """
-    Convert an image with transparency to an RGB image with a white background.
-
-    If the image has an alpha channel, composite it over a white background.
-    """
-    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-        # Ensure the image is in RGBA mode
-        img = img.convert("RGBA")
-        # Create a white background image of the same size
-        white_bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
-        # Composite the image on top of the white background using the alpha channel as mask
-        img = Image.alpha_composite(white_bg, img)
-    # Convert to RGB (this drops the alpha channel if it exists)
-    return img.convert("RGB")
