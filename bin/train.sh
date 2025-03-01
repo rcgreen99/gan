@@ -1,3 +1,3 @@
 #! /usr/bin/env bash
 
-python3 -m train "$@"
+uv run -m src.train "$@"

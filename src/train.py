@@ -6,8 +6,10 @@ import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
 
-from src.models.generator import Generator
-from src.models.discriminator import Discriminator
+# from src.models.generator import Generator
+# from src.models.discriminator import Discriminator
+from src.models.mlp_generator import MLPGenerator
+from src.models.mlp_discriminator import MLPDiscriminator
 from src.util import save_generated_images
 
 # Progress bar
@@ -30,8 +32,8 @@ def train(
     num_channels = dataset[0][0].shape[0]
 
     # Initialize the generator and discriminator
-    generator = Generator(num_channels, noise_dim, image_dim).to(device)
-    discriminator = Discriminator(num_channels, image_dim).to(device)
+    generator = MLPGenerator(num_channels, noise_dim, image_dim).to(device)
+    discriminator = MLPDiscriminator(num_channels, image_dim).to(device)
 
     # Define train loader
     train_loader = torch.utils.data.DataLoader(
@@ -51,8 +53,13 @@ def train(
 
     # Training loop
     start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
-    with alive_bar(num_epochs, title="Training Progress", length=50) as bar:
-        for epoch in range(num_epochs):
+
+    for epoch in range(num_epochs):
+        with alive_bar(
+            len(train_loader),
+            title=f"Epoch {epoch + 1}/{num_epochs}",
+            length=50,
+        ) as bar:
             for batch_idx, (data, _) in enumerate(train_loader):
                 # Move the data to the device
                 data = data.to(device)
@@ -103,14 +110,14 @@ def train(
                     bar.text(
                         f"Batch: {batch_idx}/{len(train_loader)} \nG loss: {gen_loss.item():.4f} \nD loss: {combined_loss.item():.4f}"
                     )
-            bar()  # Update the progress bar for the epoch
+                bar()  # Update the progress bar for the epoch
 
             # Save a sample of the generated images
             output_path = f"logs/{start_time}/generated_image_{epoch}.png"
             save_generated_images(generator, 16, device, output_path)
 
             # Save generator and discriminator every 10 epochs
-            if epoch % 10 == 0:
+            if epoch % 10 == 0 and epoch != 0:
                 torch.save(
                     generator.state_dict(), f"logs/{start_time}/generator_{epoch}.pth"
                 )
@@ -152,7 +159,9 @@ def get_dataset(dataset_name: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, choices=["mnist", "cifar10"])
+    parser.add_argument(
+        "--dataset", type=str, choices=["mnist", "cifar10"], default="mnist"
+    )
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--learning_rate", type=float, default=0.0002)
