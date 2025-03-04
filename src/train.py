@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
 
-from src.models.generator import ConvGenerator
-from src.models.discriminator import ConvDiscriminator
+from src.models.conv_generator import ConvGenerator
+from src.models.conv_discriminator import ConvDiscriminator
 from src.models.mlp_generator import MLPGenerator
 from src.models.mlp_discriminator import MLPDiscriminator
 from src.util import save_generated_images
