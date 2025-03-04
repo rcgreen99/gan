@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
 
-# from src.models.generator import Generator
-# from src.models.discriminator import Discriminator
+from src.models.generator import ConvGenerator
+from src.models.discriminator import ConvDiscriminator
 from src.models.mlp_generator import MLPGenerator
 from src.models.mlp_discriminator import MLPDiscriminator
 from src.util import save_generated_images
@@ -16,29 +16,78 @@ from src.util import save_generated_images
 config_handler.set_global(spinner="dots_waves", bar="classic", length=40)
 
 
-# TODO: Add parameters for model
+def get_dataset(dataset_name: str):
+    if "mnist" in dataset_name:
+        # Load the MNIST dataset
+        dataset = datasets.MNIST(
+            "data",
+            train=True,
+            download=True,
+            transform=transforms.Compose(
+                [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]
+            ),
+        )
+    elif "cifar" in dataset_name:
+        # Load the CIFAR10 dataset
+        dataset = datasets.CIFAR10(
+            "data",
+            train=True,
+            download=True,
+            transform=transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+                ]
+            ),
+        )
+    else:
+        raise ValueError(f"Dataset {dataset_name} not found")
+
+    return dataset
+
+
+def get_models(
+    model_type: str,
+    dataset: datasets.VisionDataset,
+    noise_dim: int,
+    hidden_dim: int,
+    dropout: float,
+) -> tuple[nn.Module, nn.Module]:
+    num_channels = dataset[0][0].shape[0]
+    image_dim = dataset[0][0].shape[1]
+    if model_type == "conv":
+        return (
+            ConvGenerator(num_channels, image_dim, noise_dim, hidden_dim),
+            ConvDiscriminator(num_channels, image_dim, hidden_dim, dropout),
+        )
+    elif model_type == "mlp":
+        return (
+            MLPGenerator(num_channels, image_dim, noise_dim, hidden_dim),
+            MLPDiscriminator(num_channels, image_dim, hidden_dim, dropout),
+        )
+    else:
+        raise ValueError(f"Model type {model_type} not found")
+
+
 def train(
-    dataset,
-    batch_size,
-    num_epochs,
-    learning_rate,
+    model_type: str,
+    dataset: datasets.VisionDataset,
+    batch_size: int,
+    num_epochs: int,
+    learning_rate: float,
+    noise_dim: int,
+    hidden_dim: int,
+    dropout: float,
 ):
     # Device
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    # Model parameters
-    noise_dim = 100
-    hidden_dim = 1024
-    dropout = 0.3
-    image_dim = dataset[0][0].shape[1]
-    num_channels = dataset[0][0].shape[0]
-
-    # Initialize the generator and discriminator
-    generator = MLPGenerator(num_channels, image_dim, noise_dim, hidden_dim).to(device)
-    discriminator = MLPDiscriminator(num_channels, image_dim, hidden_dim, dropout).to(
-        device
+    generator, discriminator = get_models(
+        model_type, dataset, noise_dim, hidden_dim, dropout
     )
+    generator.to(device)
+    discriminator.to(device)
 
     # Define train loader
     train_loader = torch.utils.data.DataLoader(
@@ -138,44 +187,20 @@ def train(
                 )
 
 
-def get_dataset(dataset_name: str):
-    if "mnist" in dataset_name:
-        # Load the MNIST dataset
-        dataset = datasets.MNIST(
-            "data",
-            train=True,
-            download=True,
-            transform=transforms.Compose(
-                [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]
-            ),
-        )
-    elif "cifar" in dataset_name:
-        # Load the CIFAR10 dataset
-        dataset = datasets.CIFAR10(
-            "data",
-            train=True,
-            download=True,
-            transform=transforms.Compose(
-                [
-                    transforms.ToTensor(),
-                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                ]
-            ),
-        )
-    else:
-        raise ValueError(f"Dataset {dataset_name} not found")
-
-    return dataset
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model_type", type=str, choices=["conv", "mlp"], default="conv"
+    )
     parser.add_argument(
         "--dataset", type=str, choices=["mnist", "cifar10"], default="mnist"
     )
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--noise_dim", type=int, default=100)
+    parser.add_argument("--hidden_dim", type=int, default=1024)
+    parser.add_argument("--dropout", type=float, default=0.3)
     args = parser.parse_args()
 
     # Get the dataset
@@ -183,8 +208,12 @@ if __name__ == "__main__":
 
     # Train the model
     train(
+        model_type=args.model_type,
         dataset=dataset,
         batch_size=args.batch_size,
         num_epochs=args.num_epochs,
         learning_rate=args.learning_rate,
+        noise_dim=args.noise_dim,
+        hidden_dim=args.hidden_dim,
+        dropout=args.dropout,
     )
