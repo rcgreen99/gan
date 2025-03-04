@@ -7,19 +7,31 @@ class MLPDiscriminator(nn.Module):
     A simple MLP discriminator.
     """
 
-    def __init__(self, num_channels: int, image_dim: int):
+    def __init__(
+        self,
+        num_channels: int,
+        image_dim: int,
+        hidden_dim: int,
+        dropout: float,
+    ):
         super().__init__()
         self.num_channels = num_channels
         self.image_dim = image_dim
-        self.init_hidden_dim = 768
 
         self.model = nn.Sequential(
             nn.Linear(
                 self.num_channels * self.image_dim * self.image_dim,
-                self.init_hidden_dim,
+                hidden_dim,
             ),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(self.init_hidden_dim, 1),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1),
             nn.Sigmoid(),
         )
 

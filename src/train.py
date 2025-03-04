@@ -27,13 +27,18 @@ def train(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
+    # Model parameters
     noise_dim = 100
+    hidden_dim = 1024
+    dropout = 0.3
     image_dim = dataset[0][0].shape[1]
     num_channels = dataset[0][0].shape[0]
 
     # Initialize the generator and discriminator
-    generator = MLPGenerator(num_channels, noise_dim, image_dim).to(device)
-    discriminator = MLPDiscriminator(num_channels, image_dim).to(device)
+    generator = MLPGenerator(num_channels, image_dim, noise_dim, hidden_dim).to(device)
+    discriminator = MLPDiscriminator(num_channels, image_dim, hidden_dim, dropout).to(
+        device
+    )
 
     # Define train loader
     train_loader = torch.utils.data.DataLoader(
@@ -54,6 +59,12 @@ def train(
     # Training loop
     start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
 
+    print(
+        f"Generator model parameters: {sum(p.numel() for p in generator.parameters())}"
+    )
+    print(
+        f"Discriminator model parameters: {sum(p.numel() for p in discriminator.parameters())}"
+    )
     for epoch in range(num_epochs):
         with alive_bar(
             len(train_loader),
@@ -164,7 +175,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_epochs", type=int, default=100)
-    parser.add_argument("--learning_rate", type=float, default=0.0002)
+    parser.add_argument("--learning_rate", type=float, default=1e-4)
     args = parser.parse_args()
 
     # Get the dataset

@@ -1,66 +1,38 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class MLPGenerator(nn.Module):
-    """
-    A generator that transforms a noise vector into an image via a learned upsampling process.
-    """
-
     def __init__(
-        self, num_channels: int, noise_dim: int, image_dim: int, dropout: float = 0.25
+        self,
+        num_channels: int,
+        image_dim: int,
+        noise_dim: int,
+        hidden_dim: int,
     ) -> None:
         super().__init__()
         self.num_channels = num_channels
-        self.noise_dim = noise_dim
         self.image_dim = image_dim
+        self.noise_dim = noise_dim
+        self.hidden_dim = hidden_dim
+        self.output_dim = self.num_channels * self.image_dim * self.image_dim
 
-        self.hidden_dim = 1024
-
-        # Linear layer to project the noise vector into an initial feature map.
-        self.linear1 = nn.Sequential(
+        self.mlp = nn.Sequential(
             nn.Linear(noise_dim, self.hidden_dim),
             nn.ReLU(),
-            nn.BatchNorm1d(self.hidden_dim),
-            nn.Dropout(dropout),
-        )
-        self.linear2 = nn.Sequential(
-            nn.Linear(self.hidden_dim, self.hidden_dim // 2),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
             nn.ReLU(),
-            nn.BatchNorm1d(self.hidden_dim // 2),
-            nn.Dropout(dropout),
-        )
-        self.linear3 = nn.Sequential(
-            nn.Linear(
-                self.hidden_dim // 2,
-                self.num_channels * self.image_dim * self.image_dim,
-            ),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.output_dim),
             nn.Tanh(),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass that converts the noise vector into an image.
-
-        Args:
-            x (torch.Tensor): A noise tensor of shape (batch_size, noise_dim).
-
-        Returns:
-            torch.Tensor: Generated image tensor of shape (batch_size, num_channels, image_dim, image_dim).
-        """
         batch_size = x.shape[0]
-        x = self.linear1(x)
-        # assert x.shape == (batch_size, self.hidden_dim)
-        x = self.linear2(x)
-        # assert x.shape == (batch_size, self.hidden_dim // 2)
-        x = self.linear3(x)
-        # assert x.shape == (
-        #     batch_size,
-        #     self.num_channels * self.image_dim * self.image_dim,
-        # )
-        x = x.view(batch_size, self.num_channels, self.image_dim, self.image_dim)
-        return x
+        img = self.mlp(x)
+        img = img.view(batch_size, self.num_channels, self.image_dim, self.image_dim)
+        return img
 
 
 if __name__ == "__main__":
