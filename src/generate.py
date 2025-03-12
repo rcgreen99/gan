@@ -4,7 +4,7 @@ import os
 from matplotlib import pyplot as plt
 import torch
 
-from src.models.generator import Generator
+from src.models.conv_generator import ConvGenerator
 
 
 def generate(
@@ -17,9 +17,10 @@ def generate(
 
     # Load the generator and discriminator
     num_channels = 3
-    noise_dim = 100
     image_dim = 32
-    generator = Generator(num_channels, noise_dim, image_dim).to(device)
+    noise_dim = 100
+    hidden_dim = 1024
+    generator = ConvGenerator(num_channels, image_dim, noise_dim, hidden_dim).to(device)
     generator.load_state_dict(torch.load(generator_path))
     generator.eval()
 

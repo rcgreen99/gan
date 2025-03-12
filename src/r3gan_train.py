@@ -12,8 +12,14 @@ from torchvision.utils import save_image
 import matplotlib.pyplot as plt
 import os
 
+from src.models.resnet_generator import ResNetGenerator
+from src.models.resnet_discriminator import ResNetDiscriminator
+
 from src.models.conv_generator2 import ConvGenerator
-from src.models.conv_discriminator import ConvDiscriminator
+from src.models.conv_discriminator2 import ConvDiscriminator
+
+# from src.models.conv_generator import ConvGenerator
+# from src.models.conv_discriminator import ConvDiscriminator
 from src.models.mlp_generator import MLPGenerator
 from src.models.mlp_discriminator import MLPDiscriminator
 from src.util import save_generated_images
@@ -123,6 +129,7 @@ def get_dataset(dataset_name: str):
                 [
                     transforms.Resize((32, 32)),
                     transforms.ToTensor(),
+                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                 ]
             ),
         )
@@ -133,7 +140,7 @@ def get_dataset(dataset_name: str):
 
 
 def get_models(
-    model_type: str,
+    model: str,
     dataset: datasets.VisionDataset,
     noise_dim: int,
     hidden_dim: int,
@@ -141,14 +148,24 @@ def get_models(
 ) -> tuple[nn.Module, nn.Module]:
     num_channels = dataset[0][0].shape[0]
     image_dim = dataset[0][0].shape[1]
-    if model_type == "conv":
+    if model == "conv":
         generator = ConvGenerator(num_channels, image_dim, noise_dim, hidden_dim)
         discriminator = ConvDiscriminator(num_channels, image_dim, hidden_dim, dropout)
-    elif model_type == "mlp":
+    elif model == "resnet":
+        generator = ResNetGenerator(
+            noise_dim,
+            num_channels,
+            num_channels,
+            4,
+            hidden_dim,
+            image_dim,
+        )
+        discriminator = ResNetDiscriminator(num_channels, 4, hidden_dim)
+    elif model == "mlp":
         generator = MLPGenerator(num_channels, image_dim, noise_dim, hidden_dim)
         discriminator = MLPDiscriminator(num_channels, image_dim, hidden_dim, dropout)
     else:
-        raise ValueError(f"Model type {model_type} not found")
+        raise ValueError(f"Model {model} not found")
 
     # print the parameters in MB
     print(
@@ -165,7 +182,7 @@ def get_models(
 
 
 def train(
-    model_type: str,
+    model: str,
     dataset: datasets.VisionDataset,
     batch_size: int,
     num_epochs: int,
@@ -174,16 +191,17 @@ def train(
     hidden_dim: int,
     dropout: float,
 ):
+    start_time = time.strftime("%Y%m%d_%H%M%S")
     # Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Create directory for saving images
-    os.makedirs("images", exist_ok=True)
+    os.makedirs(f"logs/{start_time}", exist_ok=True)
 
     # Get the models
     generator, discriminator = get_models(
-        model_type, dataset, noise_dim, hidden_dim, dropout
+        model, dataset, noise_dim, hidden_dim, dropout
     )
     generator.to(device)
     discriminator.to(device)
@@ -204,18 +222,23 @@ def train(
     )
 
     # Save some real samples for reference
-    save_image(sample_batch[:64], "images/real_samples.png", nrow=8, normalize=True)
+    save_image(
+        sample_batch[:64],
+        f"logs/{start_time}/real_samples.png",
+        nrow=8,
+        normalize=True,
+    )
 
     # Normalize data to [-1, 1] if it's not already
     # TODO: Do this in the dataset
-    transform_to_minus1_1 = lambda x: (
-        (x * 2 - 1) if x.min() >= 0 and x.max() <= 1 else x
-    )
+    # transform_to_minus1_1 = lambda x: (
+    #     (x * 2 - 1) if x.min() >= 0 and x.max() <= 1 else x
+    # )
 
     # Create fixed noise for visualization
     fixed_noise = torch.randn(64, noise_dim, device=device)
 
-    # Training
+    # For loss and gradient accumulation
     adv_training = AdversarialTraining(generator, discriminator)
 
     # Track losses
@@ -230,8 +253,10 @@ def train(
 
         for i, (real_samples, _) in enumerate(data_loader):
             # TODO: Do this in the dataset
-            real_samples = transform_to_minus1_1(real_samples).to(device)
-            # real_samples = real_samples.to(device)
+            # real_samples = transform_to_minus1_1(real_samples).to(device)
+
+            real_samples = real_samples.to(device)
+
             batch_size = real_samples.size(0)
             noise = torch.randn(batch_size, noise_dim, device=device)
 
@@ -267,14 +292,15 @@ def train(
                 num_batches += 1
 
                 # # Print batch statistics
-                # if i % 10 == 0:
-                #     print(f"Epoch {epoch+1}/{num_epochs}, Batch {i}/{len(data_loader)}")
-                #     print(f"  D(real): {d_real:.4f}, D(fake): {d_fake:.4f}")
-                #     print(f"  G-loss: {g_loss:.4f}, D-loss: {d_loss:.4f}")
-                #     print(f"  Generated image variance: {var:.6f}")
-                #     print(
-                #         f"  Generated range - Min: {fake_samples.min():.4f}, Max: {fake_samples.max():.4f}"
-                #     )
+                if i % 10 == 0:
+                    print(f"Epoch {epoch+1}/{num_epochs}, Batch {i}/{len(data_loader)}")
+                    print(f"  D(real): {d_real:.4f}, D(fake): {d_fake:.4f}")
+                    print(f"  G-loss: {g_loss:.4f}, D-loss: {d_loss:.4f}")
+                    print(f"  Generated image variance: {var:.6f}")
+                    print(
+                        f"  Generated range - Min: {fake_samples.min():.4f}, Max: {fake_samples.max():.4f}"
+                    )
+            break
 
         # Save epoch metrics
         avg_g_loss = epoch_g_loss / num_batches
@@ -289,7 +315,12 @@ def train(
             image_variance.append(img_variance)
 
             # Save a grid of generated images
-            save_image(gen_imgs, f"images/epoch_{epoch+1}.png", nrow=8, normalize=True)
+            save_image(
+                gen_imgs,
+                f"logs/{start_time}/epoch_{epoch+1}.png",
+                nrow=8,
+                normalize=True,
+            )
 
             print(f"\nEpoch {epoch+1} Summary:")
             print(
@@ -321,23 +352,23 @@ def train(
             plt.legend()
             plt.title("Generated Image Variance")
 
-            plt.savefig(f"images/losses_epoch_{epoch+1}.png")
+            plt.savefig(f"logs/{start_time}/losses_epoch_{epoch+1}.png")
             plt.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_type", type=str, choices=["conv", "mlp"], default="mlp"
+        "--model", type=str, choices=["conv", "mlp", "resnet"], default="mlp"
     )
     parser.add_argument(
         "--dataset", type=str, choices=["mnist", "cifar10", "celeba"], default="mnist"
     )
-    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--batch_size", type=int, default=512)  # 256 worked on celeba
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--learning_rate", type=float, default=2e-4)
     parser.add_argument("--noise_dim", type=int, default=100)
-    parser.add_argument("--hidden_dim", type=int, default=768)
+    parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.3)
     args = parser.parse_args()
 
@@ -346,7 +377,7 @@ if __name__ == "__main__":
 
     # Train the model
     train(
-        model_type=args.model_type,
+        model=args.model,
         dataset=dataset,
         batch_size=args.batch_size,
         num_epochs=args.num_epochs,

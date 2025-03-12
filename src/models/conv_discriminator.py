@@ -39,7 +39,7 @@ class ConvDiscriminator(nn.Module):
         # Linear layer to output a single probability.
         self.linear1 = nn.Sequential(
             nn.Linear(self.max_hidden_dim * 4 * 4, 1),
-            nn.Sigmoid(),
+            # nn.Sigmoid(),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

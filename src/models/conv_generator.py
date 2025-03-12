@@ -47,9 +47,9 @@ class ConvGenerator(nn.Module):
         )
 
         # Upsampling blocks
-        self.conv1 = UpsampleBlock(self.hidden_dim, self.hidden_dim // 2)
-        self.conv2 = UpsampleBlock(self.hidden_dim // 2, self.hidden_dim // 4)
-        self.conv3 = UpsampleBlock(self.hidden_dim // 4, self.num_channels)
+        self.conv1 = UpsampleBlock(self.hidden_dim, self.hidden_dim)
+        self.conv2 = UpsampleBlock(self.hidden_dim, self.hidden_dim)
+        self.conv3 = UpsampleBlock(self.hidden_dim, self.num_channels)
 
         # Tanh to scale the output to [-1, 1].
         self.tanh = nn.Tanh()

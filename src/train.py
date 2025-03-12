@@ -1,6 +1,7 @@
 import argparse
 import time
 
+from PIL import Image
 from alive_progress import alive_bar, config_handler
 import torch
 import torch.nn as nn
@@ -35,6 +36,20 @@ def get_dataset(dataset_name: str):
             download=True,
             transform=transforms.Compose(
                 [
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+                ]
+            ),
+        )
+    elif "celeba" in dataset_name:
+        # Load the CelebA dataset
+        dataset = datasets.CelebA(
+            "data",
+            split="train",
+            download=True,
+            transform=transforms.Compose(
+                [
+                    transforms.Resize((32, 32)),
                     transforms.ToTensor(),
                     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                 ]
@@ -193,7 +208,7 @@ if __name__ == "__main__":
         "--model_type", type=str, choices=["conv", "mlp"], default="conv"
     )
     parser.add_argument(
-        "--dataset", type=str, choices=["mnist", "cifar10"], default="mnist"
+        "--dataset", type=str, choices=["mnist", "cifar10", "celeba"], default="mnist"
     )
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_epochs", type=int, default=100)

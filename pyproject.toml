@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "alive-progress>=3.2.0",
+    "gdown>=5.2.0",
     "matplotlib>=3.10.1",
     "torch>=2.6.0",
     "torchvision>=0.21.0",
