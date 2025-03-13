@@ -1,11 +1,6 @@
-import os
-
-from PIL import Image
-from matplotlib import pyplot as plt
 import torch
-from torch import nn
+import torch.nn as nn
 from torchvision import datasets, transforms
-from torchvision.utils import save_image
 
 from src.models.conv_generator import ConvGenerator
 from src.models.conv_discriminator import ConvDiscriminator
@@ -13,8 +8,12 @@ from src.models.mlp_generator import MLPGenerator
 from src.models.mlp_discriminator import MLPDiscriminator
 from src.models.resnet_generator import ResNetGenerator
 from src.models.resnet_discriminator import ResNetDiscriminator
+from src.training.trainer import GANTrainer
+from src.training.training_session_arg_parser import TrainingSessionArgParser
+from src.training.train_config import TrainConfig
 
 
+# TODO: Either turn into all functinos or all methods
 def get_models(
     model: str,
     dataset: datasets.VisionDataset,
@@ -100,71 +99,69 @@ def get_dataset(dataset_name: str):
     return dataset
 
 
-def save_models(generator, discriminator, start_time, epoch):
-    os.makedirs(f"logs/{start_time}", exist_ok=True)
-    torch.save(generator.state_dict(), f"logs/{start_time}/generator_{epoch}.pth")
-    torch.save(
-        discriminator.state_dict(), f"logs/{start_time}/discriminator_{epoch}.pth"
-    )
+class TrainingSession:
+    def __init__(self, config: TrainConfig) -> None:
+        self.config = config
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    def run(self) -> None:
+        dataset = get_dataset(self.config.dataset)
+        dataloader = self.get_dataloader(dataset)
+        generator, discriminator = self.get_models(dataset)
+        optimizer_generator, optimizer_discriminator = self.get_optimizers(
+            generator, discriminator
+        )
+        criterion = self.get_criterion()
+        trainer = GANTrainer(
+            generator=generator,
+            discriminator=discriminator,
+            dataloader=dataloader,
+            generator_optimizer=optimizer_generator,
+            discriminator_optimizer=optimizer_discriminator,
+            criterion=criterion,
+            device=self.device,
+            config=self.config,
+        )
+        trainer.train()
 
-def save_losses(gen_losses, d_losses, image_variance, start_time, epoch):
-    # Save a plot of the losses
-    plt.figure(figsize=(10, 5))
-    plt.subplot(1, 2, 1)
-    plt.plot(gen_losses, label="Generator")
-    plt.plot(d_losses, label="Discriminator")
-    plt.legend()
-    plt.title("Losses")
+    def get_models(
+        self, dataset: datasets.VisionDataset
+    ) -> tuple[nn.Module, nn.Module]:
+        generator, discriminator = get_models(
+            self.config.model,
+            dataset,
+            self.config.noise_dim,
+            self.config.hidden_dim,
+            self.config.dropout,
+        )
+        generator.to(self.device)
+        discriminator.to(self.device)
+        return generator, discriminator
 
-    plt.subplot(1, 2, 2)
-    plt.plot(image_variance, label="Image Variance")
-    plt.legend()
-    plt.title("Generated Image Variance")
-
-    plt.savefig(f"logs/{start_time}/losses_epoch_{epoch+1}.png")
-    plt.close()
-
-
-def generate_and_save_samples(
-    generator, noise_vector, start_time, epoch, avg_g_loss, avg_d_loss
-):
-    """Generate, save and evaluate sample images from the generator.
-
-    Args:
-        generator: The generator model
-        noise_vector: Input noise vector for the generator
-        start_time: Timestamp for logging directory
-        epoch: Current epoch number
-        avg_g_loss: Average generator loss for the epoch
-        avg_d_loss: Average discriminator loss for the epoch
-
-    Returns:
-        float: The variance of the generated images
-    """
-    with torch.no_grad():
-        gen_imgs = generator(noise_vector).cpu()
-        img_variance = gen_imgs.var().item()
-
-        # Save a grid of generated images
-        os.makedirs(f"logs/{start_time}", exist_ok=True)
-        save_image(
-            gen_imgs[:64],
-            f"logs/{start_time}/epoch_{epoch}.png",
-            nrow=8,
-            normalize=True,
+    def get_dataloader(
+        self, dataset: datasets.VisionDataset
+    ) -> torch.utils.data.DataLoader:
+        return torch.utils.data.DataLoader(
+            dataset,
+            batch_size=self.config.batch_size,
+            shuffle=True,
         )
 
-        print(f"\nEpoch {epoch+1} Summary:")
-        print(f"  Average G-loss: {avg_g_loss:.4f}, Average D-loss: {avg_d_loss:.4f}")
-        print(f"  Image variance: {img_variance:.6f}")
+    def get_optimizers(self, generator: nn.Module, discriminator: nn.Module):
+        optimizer_generator = torch.optim.Adam(
+            generator.parameters(), lr=self.config.learning_rate
+        )
+        optimizer_discriminator = torch.optim.Adam(
+            discriminator.parameters(), lr=self.config.learning_rate
+        )
+        return optimizer_generator, optimizer_discriminator
 
-        # Early detection of mode collapse
-        if img_variance < 0.01:
-            print("WARNING: Very low image variance detected - possible mode collapse!")
-            if epoch > 10:
-                print(
-                    "Suggestion: Try adjusting learning rates or adding batch normalization"
-                )
+    def get_criterion(self):
+        return nn.BCELoss().to(self.device)
 
-    return img_variance
+
+if __name__ == "__main__":
+    parser = TrainingSessionArgParser()
+    config = parser.parse_args_to_config()
+    training_session = TrainingSession(config)
+    training_session.run()

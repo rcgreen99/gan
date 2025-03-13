@@ -1,3 +1,3 @@
 #! /usr/bin/env bash
 
-uv run -m src.train "$@"
+uv run -m src.training.training_session "$@"
