@@ -1,91 +1,27 @@
 import argparse
+import os
 import time
 
-from PIL import Image
 from alive_progress import alive_bar, config_handler
+from matplotlib import pyplot as plt
 import torch
 import torch.nn as nn
-from torchvision import datasets, transforms
+from torchvision import datasets
 
-from src.models.conv_generator import ConvGenerator
-from src.models.conv_discriminator import ConvDiscriminator
-from src.models.mlp_generator import MLPGenerator
-from src.models.mlp_discriminator import MLPDiscriminator
-from src.util import save_generated_images
+from src.util import (
+    get_models,
+    get_dataset,
+    save_models,
+    save_losses,
+    generate_and_save_samples,
+)
 
 # Progress bar
 config_handler.set_global(spinner="dots_waves", bar="classic", length=40)
 
 
-def get_dataset(dataset_name: str):
-    if "mnist" in dataset_name:
-        # Load the MNIST dataset
-        dataset = datasets.MNIST(
-            "data",
-            train=True,
-            download=True,
-            transform=transforms.Compose(
-                [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]
-            ),
-        )
-    elif "cifar" in dataset_name:
-        # Load the CIFAR10 dataset
-        dataset = datasets.CIFAR10(
-            "data",
-            train=True,
-            download=True,
-            transform=transforms.Compose(
-                [
-                    transforms.ToTensor(),
-                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                ]
-            ),
-        )
-    elif "celeba" in dataset_name:
-        # Load the CelebA dataset
-        dataset = datasets.CelebA(
-            "data",
-            split="train",
-            download=True,
-            transform=transforms.Compose(
-                [
-                    transforms.Resize((32, 32)),
-                    transforms.ToTensor(),
-                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                ]
-            ),
-        )
-    else:
-        raise ValueError(f"Dataset {dataset_name} not found")
-
-    return dataset
-
-
-def get_models(
-    model_type: str,
-    dataset: datasets.VisionDataset,
-    noise_dim: int,
-    hidden_dim: int,
-    dropout: float,
-) -> tuple[nn.Module, nn.Module]:
-    num_channels = dataset[0][0].shape[0]
-    image_dim = dataset[0][0].shape[1]
-    if model_type == "conv":
-        return (
-            ConvGenerator(num_channels, image_dim, noise_dim, hidden_dim),
-            ConvDiscriminator(num_channels, image_dim, hidden_dim, dropout),
-        )
-    elif model_type == "mlp":
-        return (
-            MLPGenerator(num_channels, image_dim, noise_dim, hidden_dim),
-            MLPDiscriminator(num_channels, image_dim, hidden_dim, dropout),
-        )
-    else:
-        raise ValueError(f"Model type {model_type} not found")
-
-
 def train(
-    model_type: str,
+    model: str,
     dataset: datasets.VisionDataset,
     batch_size: int,
     num_epochs: int,
@@ -94,12 +30,12 @@ def train(
     hidden_dim: int,
     dropout: float,
 ):
-    # Device
+    start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
     generator, discriminator = get_models(
-        model_type, dataset, noise_dim, hidden_dim, dropout
+        model, dataset, noise_dim, hidden_dim, dropout
     )
     generator.to(device)
     discriminator.to(device)
@@ -120,34 +56,31 @@ def train(
     # Define the loss function
     criterion = nn.BCELoss().to(device)
 
-    # Training loop
-    start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
-
-    print(
-        f"Generator model parameters: {sum(p.numel() for p in generator.parameters())}"
-    )
-    print(
-        f"Discriminator model parameters: {sum(p.numel() for p in discriminator.parameters())}"
-    )
+    gen_losses = []
+    d_losses = []
+    image_variance = []
     for epoch in range(num_epochs):
         with alive_bar(
             len(train_loader),
             title=f"Epoch {epoch + 1}/{num_epochs}",
             length=50,
         ) as bar:
+            epoch_gen_loss = 0
+            epoch_d_loss = 0
+            num_batches = 0
             for batch_idx, (data, _) in enumerate(train_loader):
                 # Move the data to the device
                 data = data.to(device)
                 current_batch_size = data.shape[0]
 
-                # Define the valid and fake labels using label smoothing
+                # Define the valid and fake labels
                 valid = torch.ones(current_batch_size, 1).to(device) * 0.9
                 fake = torch.zeros(current_batch_size, 1).to(device) * 0.1
 
                 # Generate a batch of noise vectors for the generator
                 noise_vector = torch.randn(current_batch_size, 100).to(device)
 
-                ### Train the Generator ###
+                ##################Train the Generator######################
                 optimizer_generator.zero_grad()
 
                 # Generate a batch of fake images
@@ -160,9 +93,7 @@ def train(
                 gen_loss.backward()
                 optimizer_generator.step()
 
-                ############################################################
-
-                ### Train the Discriminator ###
+                ##################Train the Discriminator######################
                 optimizer_discriminator.zero_grad()
 
                 # Get the discriminator's prediction on the real data
@@ -176,45 +107,58 @@ def train(
                 # Combine the losses
                 combined_loss = (real_loss + fake_loss) / 2
 
+                # Add monitoring of discriminator predictions
+                real_accuracy = (real_pred > 0.5).float().mean().item()
+                fake_accuracy = (fake_pred < 0.5).float().mean().item()
+
                 # Backpropagate the combined loss
                 combined_loss.backward()
                 optimizer_discriminator.step()
 
+                ############################################################
+
+                epoch_gen_loss += gen_loss.item()
+                epoch_d_loss += combined_loss.item()
+                num_batches += 1
+
                 # Update the progress bar
                 if batch_idx % 10 == 0:
                     bar.text(
-                        f"Batch: {batch_idx}/{len(train_loader)} \nG loss: {gen_loss.item():.4f} \nD loss: {combined_loss.item():.4f}"
+                        f"G loss: {gen_loss.item():.4f} \nD loss: {combined_loss.item():.4f} \nD real acc: {real_accuracy:.2f} \nD fake acc: {fake_accuracy:.2f}"
                     )
                 bar()  # Update the progress bar for the epoch
 
-            # Save a sample of the generated images
-            output_path = f"logs/{start_time}/generated_image_{epoch}.png"
-            save_generated_images(generator, 16, device, output_path)
+            # Save epoch metrics
+            avg_g_loss = epoch_gen_loss / num_batches
+            avg_d_loss = epoch_d_loss / num_batches
+            gen_losses.append(avg_g_loss)
+            d_losses.append(avg_d_loss)
 
-            # Save generator and discriminator every 10 epochs
-            if epoch % 10 == 0 and epoch != 0:
-                torch.save(
-                    generator.state_dict(), f"logs/{start_time}/generator_{epoch}.pth"
-                )
-                torch.save(
-                    discriminator.state_dict(),
-                    f"logs/{start_time}/discriminator_{epoch}.pth",
-                )
+            # Generate and save sample images
+            img_variance = generate_and_save_samples(
+                generator, noise_vector, start_time, epoch, avg_g_loss, avg_d_loss
+            )
+            image_variance.append(img_variance)
+
+            # Save the models every 10 epochs and the losses
+            if (epoch + 1) % 10 == 0:
+                save_models(generator, discriminator, start_time, epoch)
+                save_losses(gen_losses, d_losses, image_variance, start_time, epoch)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_type", type=str, choices=["conv", "mlp"], default="conv"
+        "--model", type=str, choices=["mlp", "conv", "resnet"], default="mlp"
     )
     parser.add_argument(
         "--dataset", type=str, choices=["mnist", "cifar10", "celeba"], default="mnist"
     )
-    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_epochs", type=int, default=100)
-    parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--learning_rate", type=float, default=2e-4)
     parser.add_argument("--noise_dim", type=int, default=100)
-    parser.add_argument("--hidden_dim", type=int, default=1024)
+    parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.3)
     args = parser.parse_args()
 
@@ -223,7 +167,7 @@ if __name__ == "__main__":
 
     # Train the model
     train(
-        model_type=args.model_type,
+        model=args.model,
         dataset=dataset,
         batch_size=args.batch_size,
         num_epochs=args.num_epochs,

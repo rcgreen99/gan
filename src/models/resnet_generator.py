@@ -15,7 +15,7 @@ class UpsampleBlock(nn.Module):
             nn.ReLU(inplace=True),
         )
         self.res_blocks = nn.Sequential(
-            ResNetBlock(in_channels, out_channels),
+            ResNetBlock(out_channels, out_channels),
             ResNetBlock(out_channels, out_channels),
         )
 
@@ -41,7 +41,9 @@ class ResNetGenerator(nn.Module):
         self.out_channels = out_channels
         self.num_stages = num_stages
         self.channels = channels
+
         self.init_size = image_dim // 2**num_stages
+
         self.head = nn.Sequential(
             nn.Linear(noise_dim, channels * self.init_size**2),
             nn.ReLU(),
@@ -59,18 +61,18 @@ class ResNetGenerator(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size = x.size(0)
         x = self.head(x)
-
         x = x.view(batch_size, self.channels, self.init_size, self.init_size)
 
         for block in self.blocks:
             x = block(x)
+
         return self.output_conv(x)
 
 
 if __name__ == "__main__":
     generator = ResNetGenerator(
         noise_dim=100,
-        in_channels=3,
+        in_channels=128,
         out_channels=3,
         num_stages=4,
         channels=64,

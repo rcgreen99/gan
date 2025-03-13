@@ -1,6 +1,7 @@
 import argparse
 import time
 from typing import Callable
+import math
 
 from PIL import Image
 from alive_progress import alive_bar, config_handler
@@ -181,6 +182,62 @@ def get_models(
     return generator, discriminator
 
 
+def get_cosine_schedule_with_warmup(initial_value, warmup_steps, max_steps):
+    """
+    Creates a schedule with a warmup period followed by cosine decay.
+
+    Args:
+        initial_value: Target value after warmup and before decay
+        warmup_steps: Number of warmup steps
+        max_steps: Total number of steps
+
+    Returns:
+        Function that takes a step and returns the scheduled value
+    """
+
+    def schedule(step):
+        if step < warmup_steps:
+            # Linear warmup
+            return initial_value * step / warmup_steps
+
+        # Cosine decay after warmup
+        progress = (step - warmup_steps) / max(1.0, max_steps - warmup_steps)
+        progress = min(1.0, progress)
+        return initial_value * 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    return schedule
+
+
+def get_gamma_schedule(start_value, end_value, cooldown_steps, max_steps):
+    """
+    Creates a schedule for gamma that starts high and decreases over time.
+
+    Args:
+        start_value: Initial high gamma value
+        end_value: Final low gamma value
+        cooldown_steps: Number of steps to maintain the high value before decay
+        max_steps: Total number of steps
+
+    Returns:
+        Function that takes a step and returns the scheduled gamma value
+    """
+
+    def schedule(step):
+        if step < cooldown_steps:
+            # Maintain high value during cooldown
+            return start_value
+
+        # Cosine decay from high to low after cooldown
+        progress = (step - cooldown_steps) / max(1.0, max_steps - cooldown_steps)
+        progress = min(1.0, progress)
+        # Cosine curve from 0 to pi maps to cosine from 1 to -1
+        # We want to go from start_value to end_value
+        cosine_factor = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return end_value + (start_value - end_value) * cosine_factor
+
+    return schedule
+
+
 def train(
     model: str,
     dataset: datasets.VisionDataset,
@@ -190,6 +247,9 @@ def train(
     noise_dim: int,
     hidden_dim: int,
     dropout: float,
+    gamma_start: float = 150.0,
+    gamma_end: float = 10.0,
+    warmup_epochs: int = 5,
 ):
     start_time = time.strftime("%Y%m%d_%H%M%S")
     # Device
@@ -229,12 +289,6 @@ def train(
         normalize=True,
     )
 
-    # Normalize data to [-1, 1] if it's not already
-    # TODO: Do this in the dataset
-    # transform_to_minus1_1 = lambda x: (
-    #     (x * 2 - 1) if x.min() >= 0 and x.max() <= 1 else x
-    # )
-
     # Create fixed noise for visualization
     fixed_noise = torch.randn(64, noise_dim, device=device)
 
@@ -245,6 +299,32 @@ def train(
     g_losses = []
     d_losses = []
     image_variance = []
+    global_step = 0
+
+    # Calculate total iterations for schedulers
+    total_steps = len(data_loader) * num_epochs
+    warmup_steps = len(data_loader) * warmup_epochs
+    gamma_cooldown_steps = (
+        warmup_steps  # Using same length as warmup for gamma cooldown
+    )
+
+    # Create schedulers for learning rate (warmup then decay) and gamma (high to low)
+    lr_schedule = get_cosine_schedule_with_warmup(
+        learning_rate, warmup_steps, total_steps
+    )
+    gamma_schedule = get_gamma_schedule(
+        gamma_start, gamma_end, gamma_cooldown_steps, total_steps
+    )
+
+    # Log the schedule configuration
+    print(f"Learning rate schedule: {learning_rate} with {warmup_epochs} warmup epochs")
+    print(
+        f"Gamma schedule: {gamma_start} to {gamma_end} with {warmup_epochs} cooldown epochs"
+    )
+
+    # Track rates for plotting
+    lr_values = []
+    gamma_values = []
 
     for epoch in range(num_epochs):
         epoch_g_loss = 0.0
@@ -252,8 +332,19 @@ def train(
         num_batches = 0
 
         for i, (real_samples, _) in enumerate(data_loader):
-            # TODO: Do this in the dataset
-            # real_samples = transform_to_minus1_1(real_samples).to(device)
+            # Update learning rate and gamma based on current step
+            current_lr = lr_schedule(global_step)
+            current_gamma = gamma_schedule(global_step)
+
+            # Update optimizer learning rates
+            for param_group in g_optimizer.param_groups:
+                param_group["lr"] = current_lr
+            for param_group in d_optimizer.param_groups:
+                param_group["lr"] = current_lr
+
+            # Track values for plotting
+            lr_values.append(current_lr)
+            gamma_values.append(current_gamma)
 
             real_samples = real_samples.to(device)
 
@@ -263,7 +354,7 @@ def train(
             # Train discriminator
             d_optimizer.zero_grad()
             adv_training.accumulate_discriminator_gradients(
-                noise, real_samples, gamma=10.0
+                noise, real_samples, gamma=current_gamma
             )
             d_optimizer.step()
 
@@ -280,6 +371,13 @@ def train(
                 d_fake = discriminator(fake_samples).mean().item()
                 d_loss = -d_real + d_fake
 
+                real_scores = discriminator(real_samples)
+                fake_scores = discriminator(fake_samples)
+
+                # Compare real scores to fake scores directly
+                real_accuracy = (real_scores > fake_scores.mean()).float().mean().item()
+                fake_accuracy = (fake_scores > real_scores.mean()).float().mean().item()
+
                 # Generator loss
                 g_loss = -discriminator(fake_samples).mean().item()
 
@@ -294,13 +392,20 @@ def train(
                 # # Print batch statistics
                 if i % 10 == 0:
                     print(f"Epoch {epoch+1}/{num_epochs}, Batch {i}/{len(data_loader)}")
+                    print(
+                        f"  Current lr: {current_lr:.6f}, Current gamma: {current_gamma:.2f}"
+                    )
                     print(f"  D(real): {d_real:.4f}, D(fake): {d_fake:.4f}")
                     print(f"  G-loss: {g_loss:.4f}, D-loss: {d_loss:.4f}")
                     print(f"  Generated image variance: {var:.6f}")
                     print(
                         f"  Generated range - Min: {fake_samples.min():.4f}, Max: {fake_samples.max():.4f}"
                     )
-            break
+                    print(
+                        f"  Real accuracy: {real_accuracy:.4f}, Fake accuracy: {fake_accuracy:.4f}"
+                    )
+
+            global_step += 1
 
         # Save epoch metrics
         avg_g_loss = epoch_g_loss / num_batches
@@ -338,21 +443,31 @@ def train(
                         "Suggestion: Try adjusting learning rates or adding batch normalization"
                     )
 
-        # Plot losses every 10 epochs
+        # Plot losses and learning rates every 10 epochs
         if (epoch + 1) % 10 == 0:
-            plt.figure(figsize=(10, 5))
-            plt.subplot(1, 2, 1)
+            plt.figure(figsize=(15, 5))
+            plt.subplot(1, 3, 1)
             plt.plot(g_losses, label="Generator")
             plt.plot(d_losses, label="Discriminator")
             plt.legend()
             plt.title("Losses")
 
-            plt.subplot(1, 2, 2)
+            plt.subplot(1, 3, 2)
             plt.plot(image_variance, label="Image Variance")
             plt.legend()
             plt.title("Generated Image Variance")
 
-            plt.savefig(f"logs/{start_time}/losses_epoch_{epoch+1}.png")
+            plt.subplot(1, 3, 3)
+            plt.plot(
+                lr_values[:: len(data_loader)], label="Learning Rate"
+            )  # Downsample for clarity
+            plt.plot(
+                gamma_values[:: len(data_loader)], label="Gamma"
+            )  # Downsample for clarity
+            plt.legend()
+            plt.title("Learning Rate & Gamma")
+
+            plt.savefig(f"logs/{start_time}/metrics_epoch_{epoch+1}.png")
             plt.close()
 
 
@@ -364,12 +479,27 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset", type=str, choices=["mnist", "cifar10", "celeba"], default="mnist"
     )
-    parser.add_argument("--batch_size", type=int, default=512)  # 256 worked on celeba
+    parser.add_argument("--batch_size", type=int, default=128)  # 256 worked on celeba
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--learning_rate", type=float, default=2e-4)
-    parser.add_argument("--noise_dim", type=int, default=100)
+    parser.add_argument("--noise_dim", type=int, default=64)
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.3)
+    parser.add_argument(
+        "--gamma_start",
+        type=float,
+        default=150.0,
+        help="Initial gradient penalty coefficient",
+    )
+    parser.add_argument(
+        "--gamma_end",
+        type=float,
+        default=10.0,
+        help="Final gradient penalty coefficient",
+    )
+    parser.add_argument(
+        "--warmup_epochs", type=int, default=5, help="Number of warmup/cooldown epochs"
+    )
     args = parser.parse_args()
 
     # Get the dataset
@@ -385,4 +515,7 @@ if __name__ == "__main__":
         noise_dim=args.noise_dim,
         hidden_dim=args.hidden_dim,
         dropout=args.dropout,
+        gamma_start=args.gamma_start,
+        gamma_end=args.gamma_end,
+        warmup_epochs=args.warmup_epochs,
     )
