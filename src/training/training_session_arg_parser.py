@@ -28,6 +28,11 @@ class TrainingSessionArgParser(ArgumentParser):
         self.add_argument("--noise_dim", type=int, default=100)
         self.add_argument("--hidden_dim", type=int, default=128)
         self.add_argument("--dropout", type=float, default=0.3)
+        self.add_argument("--add_noise", type=bool, default=False)
+        self.add_argument("--d_beta1", type=float, default=0.9)
+        self.add_argument("--d_beta2", type=float, default=0.999)
+        self.add_argument("--g_beta1", type=float, default=0.9)
+        self.add_argument("--g_beta2", type=float, default=0.999)
 
     def parse_args_to_config(self) -> TrainConfig:
         """Parse arguments and return a TrainingConfig object."""
@@ -60,4 +65,9 @@ class TrainingSessionArgParser(ArgumentParser):
                 noise_dim=args.noise_dim,
                 hidden_dim=args.hidden_dim,
                 dropout=args.dropout,
+                add_noise=args.add_noise,
+                d_beta1=args.d_beta1,
+                d_beta2=args.d_beta2,
+                g_beta1=args.g_beta1,
+                g_beta2=args.g_beta2,
             )

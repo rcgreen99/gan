@@ -1,0 +1,15 @@
+{
+    "model": "conv",
+    "dataset": "celeba",
+    "batch_size": 128,
+    "num_epochs": 100,
+    "learning_rate": 2e-4,
+    "noise_dim": 100,
+    "hidden_dim": 128,
+    "dropout": 0.3,
+    "add_noise": true,
+    "d_beta1": 0.5,
+    "d_beta2": 0.999,
+    "g_beta1": 0.5,
+    "g_beta2": 0.999
+}

@@ -149,10 +149,14 @@ class TrainingSession:
 
     def get_optimizers(self, generator: nn.Module, discriminator: nn.Module):
         optimizer_generator = torch.optim.Adam(
-            generator.parameters(), lr=self.config.learning_rate
+            generator.parameters(),
+            lr=self.config.learning_rate,
+            betas=(self.config.g_beta1, self.config.g_beta2),
         )
         optimizer_discriminator = torch.optim.Adam(
-            discriminator.parameters(), lr=self.config.learning_rate
+            discriminator.parameters(),
+            lr=self.config.learning_rate,
+            betas=(self.config.d_beta1, self.config.d_beta2),
         )
         return optimizer_generator, optimizer_discriminator
 

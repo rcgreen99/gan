@@ -12,6 +12,11 @@ class TrainConfig:
     noise_dim: int
     hidden_dim: int
     dropout: float
+    add_noise: bool
+    d_beta1: float
+    d_beta2: float
+    g_beta1: float
+    g_beta2: float
 
     @staticmethod
     def from_json(json_path: str) -> "TrainConfig":
